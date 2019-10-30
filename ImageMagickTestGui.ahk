@@ -1,15 +1,18 @@
-﻿;ImageMagickTestGui - script by Ixiko last change: 28.10.2019
+﻿;change date 29.10.2019
 
 #NoENV
 SetBatchLines, -1
 
-global 	q	:= Chr(0x22)
-global 	Textshow
-global 	IMagickDir	                		:= ".....\imagemagick"  ;<----- change that to your imagemagick 'command-line-tools' directory --- download: https://imagemagick.org/script/download.php
-global 	OriginalPicPath	            	:= A_ScriptDir "\temp.tif"
+pToken := Gdip_Startup()
+global	IMT                                  	:= IniParserEx(A_ScriptDir "\IMT.ini")
+global 	IMagickDir	                		:= StrReplace(IMT.ImageMagickMain.IMagickDir, "%A_ScriptDir%", A_ScriptDir)
+global 	OriginalPaths		           		:= CreateIMOptions(IMT, "Original")
+global	ModifiedPaths                    	:= CreateIMOptions(IMT, "Modified")
+global	IMOptions                       	:= CreateIMOptions(IMT, "ImageMagickOptions")
 global 	MagickCommands          	:= Object()
 			MagickCommands.convert	:= Object()
-global	IMOptions                       	:= ReadIMOptions()
+global 	Textshow
+global 	q	:= Chr(0x22)
 
 MagickCommands()
 MagickGui()
@@ -19,25 +22,36 @@ return
 MagickGui() {
 
 	global
-	SplitPath, OriginalPicPath,, picPath
-	origPicH:= Floor(A_ScreenHeight/1.5)
-	testpicPath:= picPath "\IMagickTest.tif"
+
+	origPicH:= Floor(A_ScreenHeight/1.2)
+
 	If (A_ScreenWidth > 1920)
 		fSize1:= 20, fSize2:= 14, fsize3:= 9
 	else
 		fSize1:= 16, fSize2:= 10, fsize3:= 8
 
+	lastOriginal:= IMT.last.Original
+	lastOriginal:= StrLen(lastOriginal) = 0 ? 1 : lastOriginal
+	lastModified:= IMT.last.Modified
+	lastModified:= StrLen(lastModified) = 0 ? 1 : lastModified
+	OriginalPicPath:= StrReplace(IMT.Original[lastOriginal], "%A_ScriptDir%", A_ScriptDir)
+	ModifiedPicPath:= StrReplace(IMT.Modified[lastModified], "%A_ScriptDir%", A_ScriptDir)
+
+	SplitPath, OriginalPicPath,, picPath
+
 	Gui, scan: New, -DPIScale ;, ;+AlwaysOnTop
 	Gui, scan: Margin, 5, 5
 	Gui, scan: Color, cA0A0A0
-	Gui, scan: Add, Picture     	, % "xm 	ym   	          	w-1"            	" h" origPicH    	" 0xE vOriginalPic 	HWNDhOriginalPic                                  	", % OriginalPicPath
+	Gui, scan: Add, Picture     	, % "xm        	 ym   	          	w-1"            	" h" origPicH    	" 0xE vOriginalPic 	HWNDhOriginalPic                                  	", % OriginalPicPath
 	GuiControlGet, p, scan: Pos, OriginalPic
-	Gui, scan: Add, Picture     	, % "x+5 	ym        		  	w" pW       		" h" pH           	" 0xE vChangedPic 	HWNDhChangedPic                                	", % ""
-	Gui, scan: Add, Combobox	, % "xm 	y"  	pH+10 " 	w" pW                           	        "   	 vPicPath1     	HWNDhPicPath1                                     	", % OriginalPicPath
-	Gui, scan: Add, Combobox	, % "x+5 	             		 	w" pW                          	        "   	 vPicPath2     	HWNDhPicPath2                                     	", % testpicPath
-	Gui, scan: Add, Combobox	, % "xm 	y+10            	w" 100                         	        " r1	 vmagickCmd 	HWNDhmagickCmd	gmagickAC           	", % "convert|magick|compare|composite|conjure|identify|mogrify|montage|stream"
-	Gui, scan: Add, Combobox	, % "x+5                        	w" (pW*2)-150                     	" r6	 vCmdOptions HWNDhCmdOptions                              	", % IMOptions
-	Gui, scan: Add, Button     	, % "x+5 	                                                         	                 	 vRun           	HWNDhRun	            	gRunImageMagick"	, % "Run"
+	Gui, scan: Add, Picture     	, % "x+5       	 ym        		  	w" pW       		" h" pH           	" 0xE vModifiedPic 	HWNDhModifiedPic                                 	", % ModifiedPicPath
+	Gui, scan: Add, Combobox	, % "xm        	 y"   pH+10 " 	w" pW  - 75                    	        "   	 vPicPath1     	HWNDhPicPath1      	                             	", % OriginalPaths
+	Gui, scan: Add, Button     	, % "x+5 	                                                         	                 	                                                                 	gChoosePath1     	", % "Browse"
+	Gui, scan: Add, Combobox	, % "x" pW+10 " y"  pH+10 " 	w" pW  - 75                    	        "   	 vPicPath2     	HWNDhPicPath2       	                              	", % ModifiedPaths
+	Gui, scan: Add, Button     	, % "x+5 	                                                         	                 	                                                                	gChoosePath2      	", % "Browse"
+	Gui, scan: Add, Combobox	, % "xm        	y+10               	w" 100                         	        " r6	 vmagickCmd 	HWNDhmagickCmd	gmagickAC           	", % "convert|magick|compare|composite|conjure|identify|mogrify|montage|stream"
+	Gui, scan: Add, Combobox	, % "x+5                               	w" (pW*2)-150                     	" r6	 vCmdOptions HWNDhCmdOptions                              	", % IMOptions
+	Gui, scan: Add, Button     	, % "x+5 	                                                         	                        	 vRun           	HWNDhRun	            	gRunImageMagick"	, % "Run"
 	Gui, scan: Font, % "s" fsize1 " cRED"
 	Gui, scan: Add, Text            , % "x" pW+5 " y" Floor(pH/2) " w" pW " vWaiting Center", work in progress...
 	Gui, scan: Add, Text            , % "x" pW+5 " y+10 w" pW " vTextshow Center", % "-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --"
@@ -46,18 +60,19 @@ MagickGui() {
 	Gui, scan: Font, % "s" fsize3 " cNavyBlue"
 	Gui, scan: Add, Text            , % "xm         	y+0  		w" pW 		" vPic1Size BackgroundTrans Center"     	, % GetImageDimensionString(OriginalPicPath)
 	Gui, scan: Font, % "s" fsize2 " cBlue"
-	Gui, scan: Add, Text            , % "x" pW+5 " ym       	w" pW-5 	" vModified BackgroundTrans Center"   	, % "modified picture"
+	Gui, scan: Add, Text            , % "x" pW+5 " ym       	w" pW-5 	" vModified BackgroundTrans Center"     	, % "modified picture"
 	Gui, scan: Font, % "s" fsize3 " cNavyBlue"
-	Gui, scan: Add, Text            , % "x" pW+5 " y+0 	    	w" pW-5 	" vPic2Size BackgroundTrans Center"     	, % "0000x0000"
+	Gui, scan: Add, Text            , % "x" pW+5 " y+0 	    	w" pW-5 	" vPic2Size BackgroundTrans Center"     	, % GetImageDimensionString(ModifiedPicPath)
 	GuiControl,scan: Hide, Waiting
 	GuiControl,scan: Hide, Textshow
 	Gui, scan: Font, s10
 	Gui, scan: Show, AutoSize, ImageMagick Test Gui
 
-	GuiControl, scan: ChooseString, magickCmd, convert
-	GuiControl, scan: Choose, PicPath1, 1
-	GuiControl, scan: Choose, PicPath2, 1
-	GuiControl, scan: Focus, CmdOptions
+	GuiControl, scan: ChooseString, magickCmd		, % IMT.last.cmd
+	GuiControl, scan: Choose    	  , CmdOptions	, % IMT.last.option
+	GuiControl, scan: Choose    	  , PicPath1       	, % lastOriginal
+	GuiControl, scan: Choose    	  , PicPath2       	, % lastModified
+	GuiControl, scan: Focus       	  , CmdOptions
 
 	Hotkey, IfWinActive , ImageMagick Test Gui
 	Hotkey, Enter, RunImageMagick
@@ -65,12 +80,81 @@ MagickGui() {
 
 return
 
-scanGuiClose:
+scanGuiClose: ;{
+	Gui, scan: Submit, NoHide
+	Loop, Parse, OriginalPaths, |
+		If Instr(A_LoopField, PicPath1)
+			IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Original"
+	Loop, Parse, ModifiedPaths, |
+		If Instr(A_LoopField, PicPath2)
+			IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Modified"
 	Gui, scan: Destroy
 	ExitApp
-return
+return ;}
 
-RunImageMagick:
+ChoosePath1: ;{
+
+	ofound:=false
+	Gui, scan: Submit, NoHide
+	SplitPath, picPath1,, outDir
+	FileSelectFile, OriginalPicPath,, % outDir, Choose a picture, pictures (*.jpg; *.tif; *.tiff; *.png; *.bmp)
+
+	Loop, Parse, OriginalPaths, |
+		If Instr(A_LoopField, OriginalPicPath)
+		{
+				IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Original"
+				ofound:=true
+		}
+
+	If !ofound
+		Loop
+		{
+				IniRead, iniVar, % A_ScriptDir "\IMT.ini", % "Original", % "OriginalPath" SubStr("000" A_Index, -2)
+				If Instr(iniVar, "Error")
+				{
+					IniWrite, % OriginalPicPath, % A_ScriptDir "\IMT.ini", % "Original", % "OriginalPath" SubStr("000" A_Index, -2)
+					IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Original"
+					break
+				}
+		}
+
+	Reload
+
+return
+;}
+
+ChoosePath2: ;{
+
+	ofound:=false
+	Gui, scan: Submit, NoHide
+	SplitPath, picPath2,, outDir
+	FileSelectFile, ModifiedPicPath, 24, % outDir, Choose a picture, pictures (*.jpg; *.tif; *.tiff; *.png; *.bmp)
+
+	Loop, Parse, ModifiedPaths, |
+		If Instr(A_LoopField, ModifiedPicPath)
+		{
+				IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Modified"
+				ofound:=true
+		}
+
+	If !ofound
+		Loop
+		{
+				IniRead, iniVar, % A_ScriptDir "\IMT.ini", % "Modified", % "ModifiedPath" SubStr("000" A_Index, -2)
+				If Instr(iniVar, "Error")
+				{
+					IniWrite, % OriginalPicPath, % A_ScriptDir "\IMT.ini", % "Modified", % "ModifiedPath" SubStr("000" A_Index, -2)
+					IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Modified"
+					break
+				}
+		}
+
+	GuiControl,scan:          	, ModifiedPic	, % ""
+
+return
+;}
+
+RunImageMagick: ;{
 
 	Gui, scan: Submit, NoHide
 	CmdOptions := Trim(CmdOptions)
@@ -81,20 +165,36 @@ RunImageMagick:
 		GuiControl, scan: , CmdOptions, % IMOptions
 		Loop
 		{
-				IniRead, iniVar, % A_ScriptFullPath, ImageMagickOptions, % magickCmd A_Index
+				IniRead, iniVar, % A_ScriptDir "\IMT.ini", % "ImageMagickOptions", % "cmd" SubStr("0000" A_Index, -3)
 				If Instr(iniVar, "Error")
 				{
-					IniWrite, % CmdOptions, % A_ScriptFullPath, ImageMagickOptions, % magickCmd A_Index
+					IniWrite, % CmdOptions, % A_ScriptDir "\IMT.ini",  % "ImageMagickOptions", % "cmd" SubStr("0000" A_Index, -3)
+					idx:= A_Index
 					break
 				}
 		}
 	}
+	else
+	{
+		For idx, cmd in IMT.ImageMagickOptions
+			If Instr(cmd, CmdOptions)
+				break
+	}
 
-	cmdline:= q IMagickDir "\" magickCmd ".exe " q " " q OriginalPicPath q " -monitor " CmdOptions " " q testpicPath q
+	IniWrite, % idx, % A_ScriptDir "\IMT.ini",  % "last", % "Option"
+
+	If !Instr(FileExist(IMagickDir), "D")
+	{
+			MsgBox, 4, ToDo, You have to specify the path to your `nImageMagick cmdline-tools folder!`nIt must be set in IMT.ini file!`n`nClick 'YES' if you wan't to open the download page`nin your browser now!
+			IfMsgBox, Yes
+				Run, https://imagemagick.org/script/download.php
+			return
+	}
+	cmdline:= q IMagickDir "\" magickCmd ".exe " q " " q OriginalPicPath q " -monitor " CmdOptions " " q ModifiedPicPath q
 
 	Gui, scan: Default
-	GuiControl,scan: Hide   	, ChangedPic
-	GuiControl,scan:          	, PicSize2     	, % ""
+	GuiControl,scan: Hide   	, ModifiedPic
+	GuiControl,scan:          	, Pic2Size     	, % ""
 	GuiControl,scan: Show	, Waiting
 	GuiControl,scan:          	, TextShow   	, % "-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --"
 	GuiControl,scan: Show	, Textshow
@@ -106,15 +206,17 @@ RunImageMagick:
 	Gui, scan: Default
 	GuiControl,scan: Hide  	, Waiting
 	GuiControl,scan: Hide  	, Textshow
-	GuiControl,scan:          	, ChangedPic	, % testpicPath
-	GuiControl,scan: Show	, ChangedPic
-	GuiControl,scan:          	, Pic2Size     	, % GetImageDimensionString(testpicPath)
+	GuiControl,scan:          	, ModifiedPic	, % ModifiedPicPath
+	GuiControl,scan: Move   	, ModifiedPic	, % "w" pW " h" pH
+	GuiControl,scan: Show	, ModifiedPic
+	GuiControl,scan:          	, Pic2Size     	, % GetImageDimensionString(ModifiedPicPath)
 
-return
+return ;}
 
-magickAC:
-
-return
+magickAC: ;{
+	Gui, scan: Submit, NoHide
+	IniWrite, % magickCmd, % A_ScriptDir "\IMT.ini",  % "last", % "CMD"
+return ;}
 }
 
 MagickCommands() {
@@ -373,24 +475,19 @@ MagickCommands() {
 	}
 }
 
-ReadIMOptions() {
+CreateIMOptions(IMT, iniKey) {
 
-	Loop
-	{
-				IniRead, iniVar, % A_ScriptFullPath, ImageMagickOptions, % "convert" A_Index
-				If Instr(iniVar, "Error")
-						break
-				IMOptions.= iniVar "|"
-	}
+	cbox:=""
+	For idx, val in IMT[inikey]
+		cbox.= StrReplace(val, "%A_ScriptDir%", A_ScriptDir) "|"
 
-return RTrim(IMOptions, "|")
+return RTrim(cbox, "|")
 }
 
 GetImageDimensionString(picFilePath) {
 	IMG_GetImageSize(picFilePath ,Width, Height)
 return Width "x" Height
 }
-
 
 StdOutToVar(cmd) {						                                                            								;-- catches the command line stream
 
@@ -1131,32 +1228,23 @@ IMG_SystemMessage(p_MessageNbr)  {
     Return l_Message
     }
 
+IniParserEx(sFile) {
+    arrSection := Object(), idx := 0
+	FileRead, iniFile, % sFile
+	iniFile:= StrReplace(inifile, "Ã¼", "ü")
+    Loop, Parse, iniFile, `n, `r
+		If RegExMatch(A_LoopField, "S)^\s*\[(.*)\]\s*$", sSecMatch)
+		{
+				arrSection[(sSecMatch1)] := Object()
+				saveSecMatch1:= sSecMatch1
+		}
+		Else If RegExMatch(A_LoopField, "S)^\s*(\w+)\s*\=\s*(.*)\s*$", sKeyValMatch)
+				If RegExMatch(sKeyValMatch1, "[A-Za-z]+\d+")
+						arrSection[saveSecMatch1].Push(sKeyValMatch2)
+				else
+						arrSection[saveSecMatch1][skeyValMatch1]:= sKeyValMatch2
 
+    Return arrSection
+}
 
-/* saved magick commands
-[ImageMagickOptions]
-convert1=-mean-shift 7x7+50%
-convert2=-antialias
-convert3=-mean-shift 7x7+80%
-convert4=-swirl 30
-convert5=-swirl 60
-convert6=-channel RGB -threshold 100%
-convert7=-channel RGB -threshold 10%
-convert8=-channel RGB -threshold 1%
-convert9=-channel RGB -threshold 99%
-convert10=-channel RGB -threshold 77%
-convert11=-channel RGB -threshold 50%
-convert12=-channel RGB -threshold 80%
-convert13=-channel RGB -threshold 90%
-convert14=-treedepth 0.5
-convert15=-treedepth 0.1
-convert16=-treedepth 0.8
-convert17=-treedepth 1
-convert18=-treedepth 1 -colors 8
-convert19=-treedepth 0.3 -colors 16
-convert20=-adaptive-blur 10x0.5
-convert21=-adaptive-blur 30
-convert22=-gamma .45455 -resize 25% -gamma 2.2
-convert23=-resize 50%
-*/
-
+#include %A_ScriptDir%\libs\Gdip_All.ahk
