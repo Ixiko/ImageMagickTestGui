@@ -1,6 +1,6 @@
 # - - - - - - - - ImageMagickTestGui - - - - - - - - 
 
-a script by Ixiko last change: 27.10.2019
+a script by Ixiko last change: 23.06.2020
 
 ------
 

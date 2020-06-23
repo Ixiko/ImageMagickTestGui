@@ -1,16 +1,33 @@
-﻿;change date 29.10.2019
+﻿;change date 23.06.2020
 
 #NoENV
 SetBatchLines, -1
 
 pToken := Gdip_Startup()
-global	IMT                                  	:= IniParserEx(A_ScriptDir "\IMT.ini")
-global 	IMagickDir	                		:= StrReplace(IMT.ImageMagickMain.IMagickDir, "%A_ScriptDir%", A_ScriptDir)
-global 	OriginalPaths		           		:= CreateIMOptions(IMT, "Original")
-global	ModifiedPaths                    	:= CreateIMOptions(IMT, "Modified")
-global	IMOptions                       	:= CreateIMOptions(IMT, "ImageMagickOptions")
-global 	MagickCommands          	:= Object()
-			MagickCommands.convert	:= Object()
+global	IMT                           	:= IniParserEx(A_ScriptDir "\IMT.ini")
+global 	IMagickDir	         		:= StrReplace(IMT.ImageMagickMain.IMagickDir, "%A_ScriptDir%", A_ScriptDir)
+If !FileExist(IMagickDir "\magick.exe") {
+
+	defaultFolder := A_ScriptDir
+
+	SelectIMagickFolder:
+	FileSelectFolder, IMagickDir, % defaultFolder, 0, % "set imagemagick folder here"
+	If ErrorLevel {
+		ExitApp
+	} else if !FileExist(IMagickDir "\magick.exe") {
+		MsgBox, 4, % "This folder`n" IMagickDir "`ndoes not seem to be an imagemagick program folder!`n`nDo you want to repeat the folder selection?"
+		IfMsgBox, No
+			ExitApp
+		goto SelectIMagickFolder
+	}
+	IniWrite, % IMagickDir, % A_ScriptDir "\IMT.ini", % "ImageMagickMain", % "IMagickDir"
+
+}
+
+global 	Originals         	     		:= PictureDir2List(A_ScriptDir "\scans", false)
+global	Modifieds                 	:= PictureDir2List(A_ScriptDir "\scans", true)
+global	IMOptions                	:= CreateIMOptions(IMT, "ImageMagickOptions")
+global 	MagickOptions          	:= Object()
 global 	Textshow
 global 	q	:= Chr(0x22)
 
@@ -23,152 +40,167 @@ MagickGui() {
 
 	global
 
-	origPicH:= Floor(A_ScreenHeight/1.2)
+	;{ gui setup
+	origPicH	:= Floor(A_ScreenHeight/1.3)
+	WinX    	:= StrLen(IMT.last.WinX) = 0 ? 0 : IMT.last.WinX
+	WinY    	:= StrLen(IMT.last.WinY) = 0 ? 0 : IMT.last.WinY
 
 	If (A_ScreenWidth > 1920)
-		fSize1:= 20, fSize2:= 14, fsize3:= 9
+		fSize1:= 20, fSize2:= 14, fsize3:= 10, fsize4:= 9
 	else
-		fSize1:= 16, fSize2:= 10, fsize3:= 8
+		fSize1:= 16, fSize2:= 10, fsize3:= 9, fsize4:= 8
 
-	lastOriginal:= IMT.last.Original
-	lastOriginal:= StrLen(lastOriginal) = 0 ? 1 : lastOriginal
-	lastModified:= IMT.last.Modified
-	lastModified:= StrLen(lastModified) = 0 ? 1 : lastModified
-	OriginalPicPath:= StrReplace(IMT.Original[lastOriginal], "%A_ScriptDir%", A_ScriptDir)
-	ModifiedPicPath:= StrReplace(IMT.Modified[lastModified], "%A_ScriptDir%", A_ScriptDir)
+	Original            	:= IMT.last.Original
+	Modified          	:= IMT.last.Modified
+	If StrLen(Modified) = 0
+		Modified:= mod_Original
 
 	SplitPath, OriginalPicPath,, picPath
+	LvOptW	:= 200
+	GrpBoxH	:= 260
+	;}
 
-	Gui, scan: New, -DPIScale ;, ;+AlwaysOnTop
+	;{ the gui
+	Gui, scan: New, -DPIScale +HWNDhIMTG ;, ;+AlwaysOnTop
 	Gui, scan: Margin, 5, 5
 	Gui, scan: Color, cA0A0A0
-	Gui, scan: Add, Picture     	, % "xm        	 ym   	          	w-1"            	" h" origPicH    	" 0xE vOriginalPic 	HWNDhOriginalPic                                  	", % OriginalPicPath
-	GuiControlGet, p, scan: Pos, OriginalPic
-	Gui, scan: Add, Picture     	, % "x+5       	 ym        		  	w" pW       		" h" pH           	" 0xE vModifiedPic 	HWNDhModifiedPic                                 	", % ModifiedPicPath
-	Gui, scan: Add, Combobox	, % "xm        	 y"   pH+10 " 	w" pW  - 75                    	        "   	 vPicPath1     	HWNDhPicPath1      	                             	", % OriginalPaths
-	Gui, scan: Add, Button     	, % "x+5 	                                                         	                 	                                                                 	gChoosePath1     	", % "Browse"
-	Gui, scan: Add, Combobox	, % "x" pW+10 " y"  pH+10 " 	w" pW  - 75                    	        "   	 vPicPath2     	HWNDhPicPath2       	                              	", % ModifiedPaths
-	Gui, scan: Add, Button     	, % "x+5 	                                                         	                 	                                                                	gChoosePath2      	", % "Browse"
-	Gui, scan: Add, Combobox	, % "xm        	y+10               	w" 100                         	        " r6	 vmagickCmd 	HWNDhmagickCmd	gmagickAC           	", % "convert|magick|compare|composite|conjure|identify|mogrify|montage|stream"
-	Gui, scan: Add, Combobox	, % "x+5                               	w" (pW*2)-150                     	" r6	 vCmdOptions HWNDhCmdOptions                              	", % IMOptions
-	Gui, scan: Add, Button     	, % "x+5 	                                                         	                        	 vRun           	HWNDhRun	            	gRunImageMagick"	, % "Run"
+
+	;-: listview for avaible options
+	Gui, scan: Add, ListView     	, % "xm ym w" LvOptW " h" origPicH " AltSubmit vAvCmdList HWNDhAvCMDList gAvCmdList", % "options"
+
+	;-: the picture frames
+	Gui, scan: Add, Picture     	, % "x+5 ym w-1 h" origPicH " 0xE vOriginalPic HWNDhOriginalPic", % A_ScriptDir "\scans\" Original
+			GuiControlGet, p, scan: Pos, OriginalPic
+	Gui, scan: Add, Picture     	, % "x+5 ym w" pW " h" origPicH " 0xE vModifiedPic HWNDhModifiedPic", % A_ScriptDir "\scans\" Modified
+
+	;-: filenames
+	Gui, scan: Font, % "s" 5     " normal cBlack"
+	Gui, scan: Add, GroupBox   	, % "x" LvOptW+10 " y" pH " w" pW " h" GrpBoxH " Section vGrpBox1", % ""
+
+	;-: cmdline exe combobox
+	ct:= GuiControlPos("scan", "GrpBox1", 0)
+	Gui, scan: Font, % "s" fsize4 " normal cBlack"
+	Gui, scan: Add, Combobox	, % "x" LvOptW+20 " y" ct.Y+10 " w" 130 " r6 vmagickCmd HWNDhmagickCmd gmagickAC ", % "convert|magick|compare|composite|conjure|identify|mogrify|montage|stream"
+	ct:= GuiControlPos("scan", "magickCMD", 5)
+	Gui, scan: Add, Combobox	, % "x" ct.R " y" ct.Y " w" (LvOptW+pW-ct.R) " r8 vVCmdOptions HWNDhCmdOptions gmagickCmdOptions", % IMOptions
+	ct:= GuiControlPos("scan", "VCmdOptions", 10)
+	Gui, scan: Font, % "s" fsize2 " bold cWhite"
+	Gui, scan: Add, Text				, % "x" LvOptW+20 " y" ct.B, % "<<"
+	Gui, scan: Font, % "s" 10 " normal cBlack"
+	Gui, scan: Add, Combobox	, % "x+5" " w" 300 " vPicPath1 HWNDhPicPath1", % Originals
+	Gui, scan: Font, % "s" fsize2 " bold cWhite"
+	Gui, scan: Add, Text				, % "x" LvOptW+20 " y+10", % ">>"
+	Gui, scan: Font, % "s" 10 " normal cBlack"
+	Gui, scan: Add, Combobox	, % "x+5 w" 300 " vPicPath2 HWNDhPicPath2", % Modifieds
+	ct:= GuiControlPos("scan", "PicPath1", 10)
+
+	Gui, scan: Font, % "s" fsize3 " normal cBlack"
+	;Gui, scan: Font, % "s" fsize2 " bold cWhite"
+	;Gui, scan: Add, Text				, % "x" ct.R " y" ct.Y , % "tool"
+	ct:= GuiControlPos("scan", "PicPath2", 10)
+	Gui, scan: Add, Button     	, % "x" ct.X " y" ct.B " w" ct.W " vRun HWNDhRun gRunImageMagick", % "run ImageMagick command"
+	ct:= GuiControlPos("scan", "Run", 25)
+	Gui, scan: Add, Button     	, % "x" ct.X " y" ct.B " w" ct.W " vRestartScript gScanGuiClose     	", % "reload this script"
+
+	;-: Imagemagick console output
+	ct:= GuiControlPos("scan", "PicPath1", 10)
+	Gui, scan: Font, % "s" fsize4 " cBlack"
+	Gui, scan: Add, Edit			   , % "x" ct.R " y" ct.Y " w" (LvOptW+pW-ct.R) " h" GrpBoxH-ct.H-35 " t7 t28 t40 t46 t64 vPicCompare HWNDhPicCompare", % ""
+	WinSet, Style	,	0x5001184, % "ahk_id " PicCompare
+	WinSet, ExStyle,	0x200   	 , % "ahk_id " PicCompare
+
+	;-: Histogram or magnifier groupboxes
+	ct:= GuiControlPos("scan", "GrpBox1", 5)
+	Gui, scan: Font, % "s" 5     " normal cBlack"
+	Gui, scan: Add, GroupBox   , % "x" ct.R " y" pH " w" Floor(pW/2 - 2.5) " h" GrpBoxH " vGrpBox2", % ""
+	ct:= GuiControlPos("scan", "GrpBox2", 5), mrg:=5
+	Gui, scan: Add, Picture     	, % "x"ct.X+mrg " y" ct.Y+mrg+5 " w" ct.W-2*mrg " h" ct.H-2*mrg " 0xE vInfoPic1 HWNDhInfopic1", % A_ScriptDir "\scans\histogram.png"
+
+	ct:= GuiControlPos("scan", "GrpBox2", 5)
+	Gui, scan: Font, % "s" 5     " normal cBlack"
+	Gui, scan: Add, GroupBox   	, % "x" ct.R " y" pH " w" Floor(pW/2 - 2.5) " h" GrpBoxH " vGrpBox3", % ""
+
 	Gui, scan: Font, % "s" fsize1 " cRED"
-	Gui, scan: Add, Text            , % "x" pW+5 " y" Floor(pH/2) " w" pW " vWaiting Center", work in progress...
-	Gui, scan: Add, Text            , % "x" pW+5 " y+10 w" pW " vTextshow Center", % "-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --"
-	Gui, scan: Font, % "s" fsize2 " cBlue"
-	Gui, scan: Add, Text            , % "xm         	ym        	w" pW  	" vOriginal BackgroundTrans Center"      	, % "original picture"
-	Gui, scan: Font, % "s" fsize3 " cNavyBlue"
-	Gui, scan: Add, Text            , % "xm         	y+0  		w" pW 		" vPic1Size BackgroundTrans Center"     	, % GetImageDimensionString(OriginalPicPath)
-	Gui, scan: Font, % "s" fsize2 " cBlue"
-	Gui, scan: Add, Text            , % "x" pW+5 " ym       	w" pW-5 	" vModified BackgroundTrans Center"     	, % "modified picture"
-	Gui, scan: Font, % "s" fsize3 " cNavyBlue"
-	Gui, scan: Add, Text            , % "x" pW+5 " y+0 	    	w" pW-5 	" vPic2Size BackgroundTrans Center"     	, % GetImageDimensionString(ModifiedPicPath)
+	Gui, scan: Add, Text            , % "x" LvOptW+pW+5 " y" Floor(pH/2) " w" pW " vWaiting Center", work in progress...
+	Gui, scan: Add, Text            , % "x" LvOptW+pW+5 " y+10 w" pW " vTextshow Center", % "-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --"
+	Gui, scan: Font, % "s" fsize1 " cBlue"
+	Gui, scan: Add, Text            , % "x" LvOptW " ym w" pW " vOriginal BackgroundTrans Center", % "original picture"
+	Gui, scan: Font, % "s" fsize4 " cNavyBlue"
+	Gui, scan: Add, Text            , % "x" LvOptW " y+0 w" pW " vPic1Size BackgroundTrans Center", % GetImageDimensionString(A_ScriptDir "\scans\" Original)
+	Gui, scan: Font, % "s" fsize1 " cBlue"
+	Gui, scan: Add, Text            , % "x" LvOptW+pW+5 " ym w" pW-5 " vModified BackgroundTrans Center", % "modified picture"
+	Gui, scan: Font, % "s" fsize4 " cNavyBlue"
+	Gui, scan: Add, Text            , % "x" LvOptW+pW+5 " y+0 w" pW-5 	" vPic2Size BackgroundTrans Center", % GetImageDimensionString(A_ScriptDir "\scans\" Modified)
+	Gui, scan: Font, % "s" fsize4-2 " cBlack"
 	GuiControl,scan: Hide, Waiting
 	GuiControl,scan: Hide, Textshow
-	Gui, scan: Font, s10
-	Gui, scan: Show, AutoSize, ImageMagick Test Gui
+	;GuiControl,scan: Hide, PicCompare
 
+	;-: adding magick cmdline options
+	For CLIndex, options in MagickOptions
+		LV_Add("", options.cmd)
+	LV_ModifyCol(1, 160)
+
+	;-: show the gui but hide it
+	Gui, scan: Show, % "x" WinX " y" WinY " Hide AutoSize", ImageMagick Test Gui
+
+	;-: get gui size and resize the listview to max height
+	scangui:= GetWindowSpot(hIMTG)
+	GuiControl, scan: Move, AvCmdList, % "h" scanGui.CH
+
+	;-: some control settings are left
 	GuiControl, scan: ChooseString, magickCmd		, % IMT.last.cmd
-	GuiControl, scan: Choose    	  , CmdOptions	, % IMT.last.option
-	GuiControl, scan: Choose    	  , PicPath1       	, % lastOriginal
-	GuiControl, scan: Choose    	  , PicPath2       	, % lastModified
-	GuiControl, scan: Focus       	  , CmdOptions
+	GuiControl, scan: Choose    	  , VCmdOptions	, % IMT.last.option
+	GuiControl, scan: ChooseString, PicPath1       	, % Original
+	GuiControl, scan: ChooseString, PicPath2       	, % Modified
+	GuiControl, scan: Focus       	  , VCmdOptions
+
+	;-: and ready to show!
+	Gui, scan: Show, % "x" WinX " y" WinY " AutoSize", ImageMagick Test Gui
+	;}
+
+	;{ Onmessage and Hotkey
+	OnMessage(0x200	, "WM_MOUSEMOVE")
+	OnMessage(0x2A2	, "WM_MOUSELEAVE")
 
 	Hotkey, IfWinActive , ImageMagick Test Gui
 	Hotkey, Enter, RunImageMagick
 	Hotkey, IfWinActive
+	;}
 
 return
 
-scanGuiClose: ;{
+scanGuiClose:       	;{
+
 	Gui, scan: Submit, NoHide
-	Loop, Parse, OriginalPaths, |
-		If Instr(A_LoopField, PicPath1)
-			IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Original"
-	Loop, Parse, ModifiedPaths, |
-		If Instr(A_LoopField, PicPath2)
-			IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Modified"
+	win := GetWindowSpot(hIMTG)
+	IniWrite, % win.X     	, % A_ScriptDir "\IMT.ini", % "last", % "WinX"
+	IniWrite, % win.Y        	, % A_ScriptDir "\IMT.ini", % "last", % "WinY"
+	IniWrite, % Original    	, % A_ScriptDir "\IMT.ini", % "last", % "Original"
+	IniWrite, % Modified  	, % A_ScriptDir "\IMT.ini", % "last", % "Modified"
+	If Instr(A_GuiControl, "RestartScript")
+		Reload
+	else
+		ExitApp
+
 	Gui, scan: Destroy
-	ExitApp
 return ;}
 
-ChoosePath1: ;{
-
-	ofound:=false
-	Gui, scan: Submit, NoHide
-	SplitPath, picPath1,, outDir
-	FileSelectFile, OriginalPicPath,, % outDir, Choose a picture, pictures (*.jpg; *.tif; *.tiff; *.png; *.bmp)
-
-	Loop, Parse, OriginalPaths, |
-		If Instr(A_LoopField, OriginalPicPath)
-		{
-				IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Original"
-				ofound:=true
-		}
-
-	If !ofound
-		Loop
-		{
-				IniRead, iniVar, % A_ScriptDir "\IMT.ini", % "Original", % "OriginalPath" SubStr("000" A_Index, -2)
-				If Instr(iniVar, "Error")
-				{
-					IniWrite, % OriginalPicPath, % A_ScriptDir "\IMT.ini", % "Original", % "OriginalPath" SubStr("000" A_Index, -2)
-					IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Original"
-					break
-				}
-		}
-
-	Reload
-
-return
-;}
-
-ChoosePath2: ;{
-
-	ofound:=false
-	Gui, scan: Submit, NoHide
-	SplitPath, picPath2,, outDir
-	FileSelectFile, ModifiedPicPath, 24, % outDir, Choose a picture, pictures (*.jpg; *.tif; *.tiff; *.png; *.bmp)
-
-	Loop, Parse, ModifiedPaths, |
-		If Instr(A_LoopField, ModifiedPicPath)
-		{
-				IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Modified"
-				ofound:=true
-		}
-
-	If !ofound
-		Loop
-		{
-				IniRead, iniVar, % A_ScriptDir "\IMT.ini", % "Modified", % "ModifiedPath" SubStr("000" A_Index, -2)
-				If Instr(iniVar, "Error")
-				{
-					IniWrite, % OriginalPicPath, % A_ScriptDir "\IMT.ini", % "Modified", % "ModifiedPath" SubStr("000" A_Index, -2)
-					IniWrite, % A_Index, % A_ScriptDir "\IMT.ini",  % "last", % "Modified"
-					break
-				}
-		}
-
-	GuiControl,scan:          	, ModifiedPic	, % ""
-
-return
-;}
-
-RunImageMagick: ;{
+RunImageMagick: 	;{
 
 	Gui, scan: Submit, NoHide
-	CmdOptions := Trim(CmdOptions)
-	If !Instr(IMOptions, CmdOptions)
+	VCmdOptions := Trim(VCmdOptions, " ")
+	If !Instr(IMOptions, VCmdOptions)
 	{
-		IMOptions.= "|" CmdOptions
+		IMOptions.= "|" VCmdOptions
 		IMOptions:= LTrim(IMOptions, "|")
-		GuiControl, scan: , CmdOptions, % IMOptions
+		GuiControl, scan: , VCmdOptions, % IMOptions
 		Loop
 		{
 				IniRead, iniVar, % A_ScriptDir "\IMT.ini", % "ImageMagickOptions", % "cmd" SubStr("0000" A_Index, -3)
 				If Instr(iniVar, "Error")
 				{
-					IniWrite, % CmdOptions, % A_ScriptDir "\IMT.ini",  % "ImageMagickOptions", % "cmd" SubStr("0000" A_Index, -3)
+					IniWrite, % VCmdOptions, % A_ScriptDir "\IMT.ini",  % "ImageMagickOptions", % "cmd" SubStr("0000" A_Index, -3)
 					idx:= A_Index
 					break
 				}
@@ -177,7 +209,7 @@ RunImageMagick: ;{
 	else
 	{
 		For idx, cmd in IMT.ImageMagickOptions
-			If Instr(cmd, CmdOptions)
+			If Instr(cmd, VCmdOptions)
 				break
 	}
 
@@ -190,10 +222,18 @@ RunImageMagick: ;{
 				Run, https://imagemagick.org/script/download.php
 			return
 	}
-	cmdline:= q IMagickDir "\" magickCmd ".exe " q " " q OriginalPicPath q " -monitor " CmdOptions " " q ModifiedPicPath q
+
+	If RegExMatch(VCmdOptions, "(?<cmdLine>.*histogram\:)(?<odified>[\w]+\.\w{3})\s*", M)
+		cmdline:= q IMagickDir "\" magickCmd ".exe " q " " q A_ScriptDir "\scans\" Original q " -monitor " McmdLine q A_ScriptDir "\scans\" Modified q
+	else
+		cmdline:= q IMagickDir "\" magickCmd ".exe " q " " q A_ScriptDir "\scans\" Original q " -monitor " VCmdOptions " " q A_ScriptDir "\scans\" Modified q
+
+	compare_cmdline1:= q IMagickDir "\compare.exe" q " " q A_ScriptDir "\scans\" Original q " -metric RMSE " q A_ScriptDir "\scans\" Modified q
+	compare_cmdline2:= q IMagickDir "\compare.exe" q " " q A_ScriptDir "\scans\" Original q " -metric PAE " q A_ScriptDir "\scans\" Modified q
 
 	Gui, scan: Default
 	GuiControl,scan: Hide   	, ModifiedPic
+	;GuiControl,scan: Hide  	, PicCompare
 	GuiControl,scan:          	, Pic2Size     	, % ""
 	GuiControl,scan: Show	, Waiting
 	GuiControl,scan:          	, TextShow   	, % "-- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- -- --"
@@ -206,25 +246,94 @@ RunImageMagick: ;{
 	Gui, scan: Default
 	GuiControl,scan: Hide  	, Waiting
 	GuiControl,scan: Hide  	, Textshow
-	GuiControl,scan:          	, ModifiedPic	, % ModifiedPicPath
+	GuiControl,scan:          	, ModifiedPic	, % A_ScriptDir "\scans\" Modified
 	GuiControl,scan: Move   	, ModifiedPic	, % "w" pW " h" pH
 	GuiControl,scan: Show	, ModifiedPic
-	GuiControl,scan:          	, Pic2Size     	, % GetImageDimensionString(ModifiedPicPath)
+	GuiControl,scan:          	, Pic2Size     	, % GetImageDimensionString(A_ScriptDir "\scans\" Modified)
+
+	out1:= StdOutToVar(compare_cmdline1)
+	out2:= StdOutToVar(compare_cmdline2)
+
+	If Instr(out1, "error/")
+		out1:= StrReplace(out1, "@", "@`n             `t|  ")
+	If Instr(out2, "error/")
+		out2:= StrReplace(out2, "@", "@`n             `t|  ")
+
+	imageInfoOut =
+		(LTrim
+		%A_Space%     image differences measured
+
+		%A_Space%method `t|  difference
+		%A_Space%--------------|---------------------------------------------------------------------------------
+		%A_Space%RMSE    `t|  %out1%
+		%A_Space%PAE       `t|  %out2%
+		)
+
+	GuiControl,scan:          	, PicCompare	, % imageInfoOut
+	;GuiControl,scan: Show  	, PicCompare
 
 return ;}
 
-magickAC: ;{
+magickAC:           	;{
 	Gui, scan: Submit, NoHide
 	IniWrite, % magickCmd, % A_ScriptDir "\IMT.ini",  % "last", % "CMD"
 return ;}
+
+magickCmdOptions:   	;{
+	cp:= C_Caret(hCmdOptions)
+	 CaretPos:= cp.S
+	;ToolTip, % "CaretPos: " CaretPos
+return ;}
+
+AvCmdList:          	;{
+
+	if Instr(A_GuiEvent, "DoubleClick")
+	{
+			;Zeile ermitteln und des Textes aus dem Feld der ersten Spalte
+			Gui, scan: Default
+			LV_GetText(ChoosedOption, A_EventInfo)
+			;SendMessage, 0xB1, -1, 0, , % "ahk_id" hCmdOptions ;removes selection and keep "caret" position unchanged!
+			SendMessage, 0xB1, % CaretPos, 0, , % "ahk_id" hCmdOptions ;removes selection and keep "caret" position unchanged!
+			ControlFocus, , % "ahk_id" hCmdOptions
+			;ToolTip, % CaretPos , 300, 300, 5
+			;GuiControl, scan: Focus, CmdOptions
+	}
+
+return ;}
+
+ScriptReload:       	;{
+	Reload
+return ;}
+}
+
+GuiControlPos(guiID, vGuiControl, distance:=0) {			; extended GuiControl position function
+
+	; this function is sometimes necessary if there is no easier way to position controls, because options like Section wan't work
+	; with .R you get the right positioning coordinate
+	; with .B you get the right positioning coordinate
+	; specify a distance, so there's no need to for an extra calculation code
+
+	ct:= Object()
+	Gui, % guiID  ": Default"
+	GuiControlGet, ct, % guiID ": Pos", % vGuiControl
+	ct.X:= ctX
+	ct.Y:= ctY
+	ct.W:= ctW
+	ct.H:= ctH
+	ct.R:= ctX + ctW + distance
+	ct.B:= ctY + ctH + distance
+
+return ct
 }
 
 MagickCommands() {
 
+	; https://imagemagick.org/script/command-line-options.php
+
 	convertOptions =
 	(LTrim
 	-blur|geometry|adaptively blur pixels; decrease effect near edges
-	-resize|geometry|adaptively resize image with data dependent triangulation.
+	-resize|geometry|adaptively resize image with data dependent triangulation
 	-sharpen|geometry|adaptively sharpen pixels; increase effect near edges
 	-adjoin||join images into a single multi-image file
 	-affine|matrix|affine transform matrix
@@ -254,17 +363,17 @@ MagickCommands() {
 	-charcoal|radius|simulate a charcoal drawing
 	-chop|geometry|remove pixels from the image interior
 	-clahe|geometry|contrast limited adaptive histogram equalization
-	-clamp||set each pixel whose value is below zero to zero and any the pixel whose value is above the quantum range to the quantum range (e.g. 65535) otherwise the pixel value remains unchanged.
+	-clamp||set each pixel whose value is below zero to zero and any the pixel whose value is above the quantum range to the quantum range (e.g. 65535) otherwise the pixel value remains unchanged
 	-clip||clip along the first path from the 8BIM profile
 	-mask|filename|associate clip mask with the image
 	-path|id|clip along a named path from the 8BIM profile
 	-clone|index|clone an image
 	-clut||apply a color lookup table to the image
 	-components|connectivity|connected-components uniquely labeled, choose from 4 or 8 way connectivity
-	-stretch|geometry|improve the contrast in an image by `stretching' the range of intensity value
+	-stretch|geometry|improve the contrast in an image by stretching the range of intensity value
 	-coalesce||merge a sequence of images
 	-colorize|value|colorize the image with the fill color
-	-matrix|matrix|apply color correction to the image.
+	-matrix|matrix|apply color correction to the image
 	-colors|value|preferred number of colors in the image
 	-colorspace|type|set image colorspace
 	-combine||combine a sequence of images
@@ -308,7 +417,7 @@ MagickCommands() {
 	-extent|geometry|set the image size
 	-extract|geometry|extract area from image
 	-family|name|render text with this font family
-	-features|distance|analyze image features (e.g. contract, correlations, etc.).
+	-features|distance|analyze image features (e.g. contract, correlations, etc.)
 	-fft||implements the discrete Fourier transform (DFT)
 	-fill|color|color to use when filling a graphic primitive
 	-filter|type|use this filter when resizing an image
@@ -358,7 +467,7 @@ MagickCommands() {
 	-metric|type|measure differences between images with this metric
 	-mode|radius|make each pixel the 'predominant color' of the neighborhood
 	-modulate|value|vary the brightness, saturation, and hue
-	-moments||display image moments.
+	-moments||display image moments
 	-monitor||monitor progress
 	-monochrome||transform image to black and white
 	-morph|value|morph an image sequence
@@ -392,14 +501,14 @@ MagickCommands() {
 	-range-threshold|low-black, low-white, high-white, high-black|perform either hard or soft thresholding within some range of values in an image
 	-mask|filename|associate a read mask with the image
 	-primary|point|chromaticity red primary point
-	-regard-warnings||pay attention to warning messages.
+	-regard-warnings||pay attention to warning messages
 	-region|geometry|apply options to a portion of the image
 	-remap|filename|transform image colors to match this set of colors
 	-render||render vector graphics
 	-repage|geometry|size and location of an image canvas
 	-resample|geometry|change the resolution of an image
 	-resize|geometry|resize the image
-	-respect-parentheses||settings remain in effect until parenthesis boundary.
+	-respect-parentheses||settings remain in effect until parenthesis boundary
 	-roll|geometry|roll an image vertically or horizontally
 	-rotate|degrees|apply Paeth rotation to the image
 	-sample|geometry|scale image with pixel sampling
@@ -449,7 +558,7 @@ MagickCommands() {
 	-trim|trim image edges
 	-type|type|image type
 	-undercolor|color|annotation bounding box color
-	-unique-colors|discard all but one of any pixel color.
+	-unique-colors|discard all but one of any pixel color
 	-units|type|the units of image resolution
 	-unsharp|geometry|sharpen the image
 	-verbose||print detailed information about the image
@@ -466,12 +575,10 @@ MagickCommands() {
 	-mask|filename|associate a write mask with the image
 	)
 
-	MagickCommands          	:=Object()
-	MagickCommands.convert	:=Object()
 	Loop, Parse, convertOptions, `n, `r
 	{
-			li:= StrSplit(A_LoopField)
-			MagickCommands.convert.Push({"cmd":li[1], "var": li[2], "info": li[3]})
+			li:= StrSplit(A_LoopField, "|")
+			MagickOptions.Push({"cmd":li[1], "var": li[2], "info": li[3]})
 	}
 }
 
@@ -486,7 +593,7 @@ return RTrim(cbox, "|")
 
 GetImageDimensionString(picFilePath) {
 	IMG_GetImageSize(picFilePath ,Width, Height)
-return Width "x" Height
+return Width " x " Height
 }
 
 StdOutToVar(cmd) {						                                                            								;-- catches the command line stream
@@ -537,10 +644,10 @@ StdOutToVar(cmd) {						                                                        
 	return sOutput
 }
 
-IMG_GetImageSize(p_FileOrHandle,ByRef r_Width:=0,ByRef r_Height:=0) {								;-- https://www.autohotkey.com/boards/viewtopic.php?p=290795#p290795
+IMG_GetImageSize(p_FileOrHandle, ByRef r_Width:=0, ByRef r_Height:=0) {								;-- https://www.autohotkey.com/boards/viewtopic.php?p=290795#p290795
     Static Dummy27649730
 
-          ;-- Image types
+
           ,IMAGE_BITMAP:=0
           ,IMAGE_ICON  :=1
           ,IMAGE_CURSOR:=2
@@ -631,12 +738,6 @@ IMG_GetImageSize(p_FileOrHandle,ByRef r_Width:=0,ByRef r_Height:=0) {								;--
     FileString:=StrGet(&FileData,30,"CP0")
 ;;;;;    outputdebug FileString: %FileString%
 
-    ;[===================]
-    ;[  Animated Cursor  ]
-    ;[===================]
-    ;-- https://www.gdgsoft.com/anituner/help/aniformat.htm
-    ;-- https://en.wikipedia.org/wiki/ANI_(file_format)
-    ;-- https://en.wikipedia.org/wiki/Resource_Interchange_File_Format
     if (SubStr(FileString,1,4)="RIFF" and StrGet(&FileData+8,4,"CP0")="ACON")
         {
 ;;;;;        outputdebug ANI File!
@@ -1228,6 +1329,297 @@ IMG_SystemMessage(p_MessageNbr)  {
     Return l_Message
     }
 
+createHistogramBMP(pBitmap, OSDTextColor:="ffFFFFFF", OSDbgrColor:="ffAAAAAA" ) {
+
+   Gdip_GetHistogram(pBitmap, 3, brLvlArray, 0, 0)
+   Gdip_GetImageDimensions(pBitmap, imgW, imgH)
+   ; Gdip_GetHistogram(whichBmp, 2, ArrChR, ArrChG, ArrChB)
+
+   minBrLvlV := TotalPixelz := imgW * imgH
+   Loop, 256
+   {
+       thisIndex := A_Index - 1
+       nrPixelz := brLvlArray[thisIndex]
+       If (nrPixelz="")
+          Continue
+
+       stringArray .= nrPixelz "." (thisIndex+1) "`n"
+       If (nrPixelz>0)
+          stringArray2 .= (thisIndex+1) "." nrPixelz "`n"
+       If (nrPixelz>1)
+          stringArray3 .= (thisIndex+1) "." nrPixelz "`n"
+       sumTotalBr += nrPixelz * (thisIndex+1)
+       SimpleSumTotalBr += nrPixelz
+       If (nrPixelz>modePointV)
+       {
+          modePointV := nrPixelz
+          modePointK := thisIndex
+       }
+       If (nrPixelz<modePointV && nrPixelz>2ndMaxV)
+          2ndMaxV := nrPixelz
+
+       If (nrPixelz<minBrLvlV && nrPixelz>2)
+       {
+          minBrLvlV := nrPixelz
+          minBrLvlK := thisIndex
+       }
+   }
+
+   Sort, stringArray, ND`n
+   GetClientSize(mainWidth, mainHeight, PVhwnd)
+   avgBrLvlK := Round(sumTotalBr/TotalPixelz - 1, 1)
+   avgBrLvlV := brLvlArray[Round(avgBrLvlK)]
+   modePointK2 := ST_ReadLine(stringArray, "L")
+   modePointK2 := StrSplit(modePointK2, ".")
+   2ndMaxVa := (2ndMaxV + avgBrLvlV)//2 + minBrLvlV
+   rangeA := ST_ReadLine(stringArray3, 1)
+   rangeA := StrSplit(rangeA, ".")
+   rangeB := ST_ReadLine(stringArray3, "L")
+   rangeB := StrSplit(rangeB, ".")
+   Loop, 256
+   {
+       minBrLvlK2 := ST_ReadLine(stringArray, A_Index)
+       minBrLvlK2 := StrSplit(minBrLvlK2, ".")
+       If (minBrLvlK2[1]=0)
+          Continue
+       If (minBrLvlK2[2]>0)
+          Break
+   }
+   rangeC := rangeB[1] - rangeA[1] + 1
+   meanValue := SimpleSumTotalBr/rangeC
+   meanValuePrc := Round(meanValue/TotalPixelz * 100)
+   meanValuePrc := (meanValuePrc>0) ? " (" meanValuePrc "%) " : ""
+
+   2ndMaxVb := (2ndMaxV + meanValue)//2 + minBrLvlV
+   2ndMaxV := minU(2ndMaxVa, 2ndMaxVb)
+   Loop, 256
+   {
+       lookMean := ST_ReadLine(stringArray, A_Index)
+       lookMean := StrSplit(lookMean, ".")
+       thisMean := lookMean[1]
+       If (thisMean>meanValue)
+       {
+          meanValueK := Round((prevMean + lookMean[2] - 1)/2, 1)
+          Break
+       } prevMean := lookMean[2]
+   }
+   meanValueK := !meanValueK ? "" : " | Mean: " meanValueK meanValuePrc
+
+   Loop, 256
+   {
+       lookValue := ST_ReadLine(stringArray2, A_Index)
+       lookValue := StrSplit(lookValue, ".")
+       thisSum += lookValue[2]
+       If (thisSum>TotalPixelz//2)
+       {
+          medianValue := lookValue[1] - 1
+          Break
+       }
+   }
+
+   peakPrc := Round(modePointK2[1]/TotalPixelz * 100)
+   peakPrc := (peakPrc>0) ? " (" peakPrc "%)" : ""
+   minPrc := Round(minBrLvlK2[1]/TotalPixelz * 100)
+   minPrc := (minPrc>0) ? " (" minPrc "%)" : ""
+   medianPrc := Round(lookValue[2]/TotalPixelz * 100)
+   medianPrc := (medianPrc>0) ? " (" medianPrc "%)" : ""
+   avgPrc := Round(avgBrLvlV/TotalPixelz * 100)
+   avgPrc := (avgPrc>0) ? " (" avgPrc "%)" : ""
+   TotalPixelzSpaced := groupDigits(TotalPixelz)
+
+   infoRange := "Range: " rangeA[1] - 1 " - " rangeB[1] - 1 " (" rangeC ")"
+   infoPeak := "`nMode: " modePointK2[2] - 1 peakPrc
+   infoAvg := " | Avg: " avgBrLvlK avgPrc " | Min: " minBrLvlK2[2] - 1 minPrc
+   infoMin := "`nMedian: " medianValue medianPrc meanValueK
+   entireString := infoRange infoPeak infoAvg infoMin "`nTotal pixels: " TotalPixelzSpaced
+   infoBoxBMP := drawTextInBox(entireString, OSDFontName, OSDfntSize//1.5, mainWidth//1.3, mainHeight//1.3, OSDtextColor, "0xFF" OSDbgrColor, 1, 0)
+   ; tooltip, % "|" TotalPixelz "|" modePointV ", " 2ndMaxV ", " avgBrLvlV " || "  maxW "," maxH  ;  `n" PointsList
+   Scale := (PrefsLargeFonts=1) ? 2.6 : 1.7
+   HistogramBMP := drawHistogram(brLvlArray, 2ndMaxV, 256, Scale, "0xFF" OSDtextColor, "0x" OSDbgrColor, imgHUDbaseUnit//3, infoBoxBMP)
+   Gdip_DisposeImage(infoBoxBMP, 1)
+}
+
+ST_ReadLine(String, line, delim="`n", exclude="`r") {
+   String := Trim(String, delim)
+   StringReplace, String, String, %delim%, %delim%, UseErrorLevel
+   TotalLcount := ErrorLevel + 1
+
+   If (abs(line)>TotalLCount && (line!="L" || line!="R" || line!="M"))
+      Return 0
+
+   If (Line="R")
+      Random, Rand, 1, %TotalLcount%
+   Else If (line<=0)
+      line := TotalLcount + line
+
+   Loop, Parse, String, %delim%, %exclude%
+   {
+      out := (Line="R" && A_Index=Rand) ? A_LoopField
+           : (Line="M" && A_Index=TotalLcount//2) ? A_LoopField
+           : (Line="L" && A_Index=TotalLcount) ? A_LoopField
+           : (A_Index=Line) ? A_LoopField : -1
+      If (out!=-1) ; Something was found so stop searching.
+         Break
+   }
+   Return out
+}
+
+ST_Insert(insert,input,pos=1) {
+	Length := StrLen(input)
+	((pos > 0) ? (pos2 := pos - 1) : (((pos = 0) ? (pos2 := StrLen(input),Length := 0) : (pos2 := pos))))
+	output := SubStr(input, 1, pos2) . insert . SubStr(input, pos, Length)
+	If (StrLen(output) > StrLen(input) + StrLen(insert))
+		((Abs(pos) <= StrLen(input)/2) ? (output := SubStr(output, 1, pos2 - 1) . SubStr(output, pos + 1, StrLen(input))) : (output := SubStr(output, 1, pos2 - StrLen(insert) - 2) . SubStr(output, pos - StrLen(insert), StrLen(input))))
+	return, output
+}
+
+minU(val1, val2, val3:="null") {
+  a := (val1<val2) ? val1 : val2
+  If (val3!="null")
+     a := (a<val3) ? a : val3
+  Return a
+}
+
+maxU(val1, val2, val3:="null") {
+  a := (val1>val2) ? val1 : val2
+  If (val3!="null")
+     a := (a>val3) ? a : val3
+  Return a
+}
+
+groupDigits(nrIn, delim:=" ") {
+   nrOut := nrIn
+   If StrLen(nrOut)>3
+      nrOut := ST_Insert(delim, nrOut, StrLen(nrOut) - 2)
+   If StrLen(nrOut)>7
+      nrOut := ST_Insert(delim, nrOut, StrLen(nrOut) - 6)
+   If StrLen(nrOut)>11
+      nrOut := ST_Insert(delim, nrOut, StrLen(nrOut) - 10)
+   If StrLen(nrOut)>15
+      nrOut := ST_Insert(delim, nrOut, StrLen(nrOut) - 14)
+   Return nrOut
+}
+
+drawHistogram(dataArray, maxYlimit, LengthX, Scale, fgrColor, bgrColor, borderSize, infoBoxBMP) { ;stolen from quick-picto-viewer
+
+    graphPath := Gdip_CreatePath()
+    PointsList .= 0 "," 125 "|"
+    Loop, % LengthX
+    {
+        y1 := 125 - ((dataArray[A_Index - 1]/maxYlimit) * 100)
+        If (y1<0)
+           y1 := 0
+        PointsList .= A_Index - 1 ","  y1 "|"
+    }
+    PointsList .= LengthX + 1 "," 125
+    Gdip_AddPathClosedCurve(graphPath, PointsList, 0.001)
+    pMatrix := Gdip_CreateMatrix()
+    Gdip_ScaleMatrix(pMatrix, Scale, Scale, 1)
+    Gdip_TransformPath(graphPath, pMatrix)
+
+    thisRect := Gdip_GetPathWorldBounds(graphPath)
+    imgW := thisRect.w, imgH := thisRect.h
+    hbm := CreateDIBSection(imgW, imgH)
+    hdc := CreateCompatibleDC()
+    obm := SelectObject(hdc, hbm)
+    ;G := Gdip_GraphicsFromHDC(hdc, 7, 4, 2) ; ???
+    G := Gdip_GraphicsFromHDC(hdc)
+    pBr0 := Gdip_BrushCreateSolid(bgrColor)
+    pBr1 := Gdip_BrushCreateSolid(fgrColor)
+    Gdip_FillRectangle(G, pBr0, -2, -2, imgW + 4, imgH + 4)
+    Gdip_FillRectangle(G, pBrushE, -2, -2, imgW + 4, imgH + 4)
+
+    Gdip_FillPath(G, pBr1, graphPath)
+    Gdip_DeletePath(graphPath)
+    Gdip_DeleteMatrix(pMatrix)
+    Gdip_GetImageDimensions(infoBoxBMP, imgW2, imgH2)
+    clipBMPa := Gdip_CreateBitmapFromHBITMAP(hbm)
+    clipBMP := Gdip_CreateBitmap(imgW + borderSize * 2, imgH + imgH2 + Round(borderSize*1.5), 0x21808)   ; 24-RGB
+    G3 := Gdip_GraphicsFromImage(clipBMP)
+    Gdip_GetImageDimensions(clipBMP, maxW, maxH)
+    lineThickns := borderSize//10
+    Gdip_SetPenWidth(pPen1d, lineThickns)
+    Gdip_FillRectangle(G3, pBr0, -2, -2, maxW + borderSize*2+12, maxH + borderSize*3)
+    Gdip_DrawRectangle(G3, pPen1d, borderSize - lineThickns, borderSize - lineThickns, imgW + lineThickns*2, imgH + lineThickns*2)
+    Gdip_DrawImageFast(G3, clipBMPa, borderSize, borderSize)
+    Gdip_DrawImageFast(G3, infoBoxBMP, borderSize, imgH + borderSize*1.25)
+    Gdip_DeleteGraphics(G3)
+    Gdip_DisposeImage(clipBMPa, 1)
+    Gdip_DeleteBrush(pBr0)
+    Gdip_DeleteBrush(pBr1)
+    SelectObject(hdc, obm)
+    DeleteObject(hbm)
+    DeleteDC(hdc)
+    ; tooltip, % maxYlimit ", " LengthX " || "  maxW "," maxH  ;  `n" PointsList
+    Return clipBMP
+}
+
+drawTextInBox(theString, fntName, theFntSize, maxW, maxH, txtColor, bgrColor, NoWrap, flippable:=0) {
+    hbm := CreateDIBSection(maxW, maxH)
+    hdc := CreateCompatibleDC()
+    obm := SelectObject(hdc, hbm)
+    ;G := Gdip_GraphicsFromHDC(hdc, 7, 4, 2) ;???
+    G := Gdip_GraphicsFromHDC(hdc)
+    pBr0 := Gdip_BrushCreateSolid(bgrColor)
+    Gdip_FillRectangle(G, pBr0, -2, -2, maxW + 4, maxH + 4)
+    If (FontBolded=1)
+       txtStyle .= " Bold"
+    If (FontItalica=1 && NoWrap=0)
+       txtStyle .= " Italic"
+    Else If (NoWrap=1)
+       txtStyle .= " NoWrap"
+    txtOptions := "x1 y1 " usrTextAlign " cEE" txtColor " r4 s" theFntSize txtStyle
+    dimensions := Gdip_TextToGraphics(G, theString, txtOptions, fntName, maxW, maxH, 0, 0)
+    txtRes := StrSplit(dimensions, "|")
+    txtX := Floor(txtRes[1]-1)
+    txtY := Floor(txtRes[2]-1)
+    txtResW := Ceil(txtRes[3]+2)
+    If (txtResW>maxW)
+       txtResW := maxW
+    txtResH := Ceil(txtRes[4]+2)
+    If (txtResH>maxH)
+       txtResH := maxH
+    clipBMPa := Gdip_CreateBitmapFromHBITMAP(hbm)
+    clipBMPb := Gdip_CloneBitmapArea(clipBMPa, txtX + 1, txt + 1, txtResW - 1, txtResH - 1)
+    Gdip_DisposeImage(clipBMPa, 1)
+
+    borderSize := NoWrap ? Floor(theFntSize*1.1) : Floor(theFntSize*1.3)
+    clipBMP := Gdip_CreateBitmap(txtResW + borderSize * 2, txtResH + borderSize*2, 0x21808)   ; 24-RGB
+    G3 := Gdip_GraphicsFromImage(clipBMP)
+    Gdip_GetImageDimensions(clipBMP, maxW, maxH)
+    If (flippable=1)
+       setMainCanvasTransform(maxW, maxH, G3)
+    Gdip_FillRectangle(G3, pBr0, -2, -2, txtResW + borderSize*2+12, txtResH + borderSize*2+12)
+    Gdip_DrawImageFast(G3, clipBMPb, borderSize, borderSize)
+    Gdip_DeleteGraphics(G3)
+    Gdip_DisposeImage(clipBMPb, 1)
+    Gdip_DeleteBrush(pBr0)
+    SelectObject(hdc, obm)
+    DeleteObject(hbm)
+    DeleteDC(hdc)
+Return clipBMP
+}
+
+setMainCanvasTransform(W, H, G:=0) {
+    If (thumbsDisplaying=1)
+       Return
+
+    If !G
+       G := glPG
+
+    If (FlipImgH=1)
+    {
+       Gdip_ScaleWorldTransform(G, -1, 1)
+       Gdip_TranslateWorldTransform(G, -W, 0)
+    }
+
+    If (FlipImgV=1)
+    {
+       Gdip_ScaleWorldTransform(G, 1, -1)
+       Gdip_TranslateWorldTransform(G, 0, -H)
+    }
+}
+
 IniParserEx(sFile) {
     arrSection := Object(), idx := 0
 	FileRead, iniFile, % sFile
@@ -1245,6 +1637,136 @@ IniParserEx(sFile) {
 						arrSection[saveSecMatch1][skeyValMatch1]:= sKeyValMatch2
 
     Return arrSection
+}
+
+PictureDir2List(dir, mod:= true) {                                                           	;-- reads a directory
+
+	Loop, Files, % dir "\*.*"
+	{
+			If A_LoopFileExt not in jpg,tif,png,bmp
+				continue
+
+			if mod && RegExMatch(A_LoopFileName, "^mod_")
+				pics.= A_LoopFileName "|"
+			else if !mod && !RegExMatch(A_LoopFileName, "^mod_")
+				pics.= A_LoopFileName "|"
+	}
+
+return RTrim(pics, "|")
+}
+
+GetWindowSpot(hWnd) {                                                                                                           	;-- like GetWindowInfo, but faster because it only returns position and sizes
+    NumPut(VarSetCapacity(WINDOWINFO, 60, 0), WINDOWINFO)
+    DllCall("GetWindowInfo", "Ptr", hWnd, "Ptr", &WINDOWINFO)
+    wi := Object()
+    wi.X   	:= NumGet(WINDOWINFO, 4	, "Int")
+    wi.Y   	:= NumGet(WINDOWINFO, 8	, "Int")
+    wi.W  	:= NumGet(WINDOWINFO, 12, "Int") 	- wi.X
+    wi.H  	:= NumGet(WINDOWINFO, 16, "Int") 	- wi.Y
+    wi.CX	:= NumGet(WINDOWINFO, 20, "Int")
+    wi.CY	:= NumGet(WINDOWINFO, 24, "Int")
+    wi.CW 	:= NumGet(WINDOWINFO, 28, "Int") 	- wi.CX
+    wi.CH  	:= NumGet(WINDOWINFO, 32, "Int") 	- wi.CY
+    wi.BW	:= NumGet(WINDOWINFO, 48, "UInt")
+    wi.BH	:= NumGet(WINDOWINFO, 52, "UInt")
+Return wi
+}
+
+WM_MOUSEMOVE(wParam, lParam, Msg, Hwnd) {
+   ; LVM_HITTEST   -> docs.microsoft.com/en-us/windows/desktop/Controls/lvm-hittest
+   ; LVHITTESTINFO -> docs.microsoft.com/en-us/windows/desktop/api/Commctrl/ns-commctrl-taglvhittestinfo
+   static item_old
+   static maxChars	:= 45
+   TT := ""
+	If (A_GuiControl = "AvCmdList") {
+      VarSetCapacity(LVHTI, 24, 0) ; LVHITTESTINFO
+      , NumPut(lParam & 0xFFFF, LVHTI, 0, "Int")
+      , NumPut((lParam >> 16) & 0xFFFF, LVHTI, 4, "Int")
+      , Item := DllCall("SendMessage", "Ptr", Hwnd, "UInt", 0x1012, "Ptr", 0, "Ptr", &LVHTI, "Int") ; LVM_HITTEST
+      If (Item >= 0) && (NumGet(LVHTI, 8, "UInt") & 0x0E)
+	  {
+			If (item_old = item)
+				return
+			item_old:= item
+
+			Gui, ListView, %A_GuiControl%
+			LV_GetText(TT, Item + 1)
+
+			For idx, option in MagickOptions
+				If RegExMatch(option.cmd, "^" TT)
+				{
+						infoT:= "Option:        " option.cmd (StrLen(option.var)= 0 ? "`n" : " [" option.var "]`n")
+						infoE:= "Description: "
+						rT:= StrSplit(option.info, " ")
+
+						Loop, % rt.MaxIndex()
+							If ((StrLen(infoE) + StrLen(rt[A_Index]) + 1) <= (maxChars+20))
+								infoE .= " " rt[A_Index]
+							else
+							{
+								infoT .= infoE "`n"
+								infoE := ""
+								infoE .= "                     " rt[A_Index]
+							}
+
+						If StrLen(infoE) > 0
+							infoT .= infoE
+
+						ToolTip, % RTrim(infoT, "`n                    "),,, 20
+						SetTimer, killTip, -4000
+				}
+      }
+	}
+	else
+		ToolTip,,,, 20
+return
+killTip:
+		ToolTip,,,, 20
+return
+}
+
+WM_MOUSELEAVE() {
+	ToolTip,,,, 20
+}
+
+C_Caret(ControlId) {
+;This function returns the Caret info relative to the specified Control's client area!
+;if "ControlId = a Control Hwnd Id" the function will get the Caret S,L,X,Y positions!
+;if "ControlId = S" the function returns the Caret String Position
+;if "ControlId = L" the function returns the Caret Line Position
+;if "ControlId = X" the function returns the Caret x Position
+;if "ControlId = Y" the function returns the Caret Y Position
+
+Static S,L,X,Y		;remember values between function calls
+
+T_CoordModeCaret := A_CoordModeCaret	;necessary to restore thread default option before function return
+CoordMode, Caret, screen
+sleep, 1				;prevents A_CaretX\A_Carety from returning incorrect values
+
+VarSetCapacity(WINDOWINFO, 60, 0)
+DllCall("GetWindowInfo", Ptr, ControlId, Ptr, &WINDOWINFO)
+
+X := A_CaretX - NumGet(WINDOWINFO, 20, "Int")	;"20" returns the control client area x pos relative to screen upper-left corner
+Y := A_Carety - NumGet(WINDOWINFO, 24, "Int")	;"24" returns the control client area y pos relative to screen upper-left corner
+
+;EM_CHARFROMPOS = 0x00D7 -> msdn.microsoft.com/en-us/library/bb761566(v=vs.85).aspx
+Char := DllCall("User32.dll\SendMessage", "Ptr", ControlId, "UInt", 0x00D7, "Ptr", 0, "UInt", (Y << 16) | X, "Ptr")
+
+S := (Char & 0xFFFF) + 1	;"+1" force 1 instead 0 to be recognised as first character
+L := (Char >> 16) + 1
+
+CoordMode, Caret, % T_CoordModeCaret	;restore thread default option before function return
+sleep, 1				;prevents A_CaretX\A_Carety from returning incorrect values
+
+return {"S": S, "L": L, "X": X, "Y": Y}
+}
+
+GetClientSize(ByRef w, ByRef h, hwnd) {
+; by Lexikos http://www.autohotkey.com/forum/post-170475.html
+    VarSetCapacity(rc, 16, 0)
+    DllCall("GetClientRect", "uint", hwnd, "uint", &rc)
+    prevW := W := NumGet(rc, 8, "int")
+    prevH := H := NumGet(rc, 12, "int")
 }
 
 #include %A_ScriptDir%\libs\Gdip_All.ahk
